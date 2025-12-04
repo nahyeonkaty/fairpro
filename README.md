@@ -85,14 +85,6 @@ source .venv/bin/activate
 uv pip install -e .
 ```
 
-Alternatively, using pip:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
-```
-
 ## Usage
 
 ### Step 1: Generate Fairness-Aware System Prompts
