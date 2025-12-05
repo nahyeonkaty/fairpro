@@ -1,6 +1,6 @@
 # Aligned but Stereotypical? The Hidden Influence of System Prompts on Social Bias in LVLM-Based Text-to-Image Models
 
-NaHyeon Park*<sup>1</sup>, Namin An*<sup>1</sup>, Kunhee Kim<sup>1</sup>, Soyeon Yoon<sup>1</sup>, Jiahao Huo<sup>2</sup>, Hyunjung Shim<sup>1</sup>
+NaHyeon Park*<sup>1</sup>, Na Min An*<sup>1</sup>, Kunhee Kim<sup>1</sup>, Soyeon Yoon<sup>1</sup>, Jiahao Huo<sup>2</sup>, Hyunjung Shim<sup>1</sup>
 
 <sup>1</sup>KAIST, <sup>2</sup>HKUST
 
