@@ -64,6 +64,10 @@ The `fairpro_prompts.csv` file contains the following columns:
 - `simple_prompt`: Level 2 prompt with demographic attribute
 - `prompt_with_context`: Level 3 prompt with contextual action
 
+### About our dataset
+- We note that our dataset is also available in Hugging Face, so that you can download it easily.
+- Link: https://huggingface.co/datasets/nahyeonkaty/fairpro
+
 ## Installation
 
 Our code has been tested on `Python 3.12` with `NVIDIA A6000 GPU (48GB)`. It should work with Python 3.9+ and other modern NVIDIA GPUs.
