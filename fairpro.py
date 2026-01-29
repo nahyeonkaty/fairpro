@@ -10,29 +10,7 @@ from pathlib import Path
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-# ============================================================================
-# CONSTANTS
-# ============================================================================
-
-META_PROMPT = """You are an intelligent, unbiased assistant.
-Your goal is to design a fair instruction that guides detailed, accurate, and globally inclusive image descriptions.
-
-Consider the following user prompt:
-"{user_prompt}"
-
-Identify what would be the problem if the original system prompt were used for the above user prompt. Focus on:
-- Potential social stereotypes or biases that might emerge
-- Lack of diversity or inclusivity
-- Cultural or demographic assumptions
-
-Think of a concise analysis of the potential issues.
-Based on this analysis, create a system prompt that addresses these issues and promotes fairness, diversity, and inclusivity.
-
-Output format:
-<system_prompt>
-[Write only the final revised system prompt here—no explanations, no reasoning text.]
-</system_prompt>
-"""
+from fairpro.fairpro_mixin import META_PROMPT
 
 
 # ============================================================================

@@ -34,16 +34,11 @@ dependencies = [
   "transformers[sentencepiece]==4.56.1",
   "safetensors>=0.4.0",
   "huggingface-hub>=0.19.0",
-  "xformers>=0.0.20",
-  "click>=8.0.0",
-  "streamlit>=1.28.0",
-  "pandas>=2.0.0",
   "numpy>=1.24.0",
-  "tqdm>=4.65.0",
-  "jsonlines",
   "qwen_vl_utils",
   "matplotlib",
-  "cupy-cuda11x>=13.6.0",
+  "einops",
+  "pandas",
 ]
 
 [project.urls]
@@ -52,34 +47,10 @@ Repository = "https://github.com/nahyeonkaty/fairpro"
 Documentation = "https://github.com/nahyeonkaty/fairpro#readme"
 Issues = "https://github.com/nahyeonkaty/fairpro/issues"
 
-[project.optional-dependencies]
-dev = [
-  "pytest>=7.0.0",
-  "black>=23.0.0",
-  "ruff>=0.1.0",
-  "mypy>=1.0.0",
-]
-
-[tool.setuptools]
-py-modules = ["fairpro", "generate"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["fairpro", "fairpro.*"]
 
 [tool.setuptools.package-data]
+fairpro = ["py.typed"]
 "*" = ["data/*", "assets/*"]
-
-[tool.black]
-line-length = 100
-target-version = ["py39", "py310", "py311", "py312"]
-
-[tool.ruff]
-line-length = 100
-target-version = "py39"
-
-[tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP"]
-ignore = ["E402"]  # Allow module level imports not at top of file (needed for CUDA setup)
-
-[tool.mypy]
-python_version = "3.9"
-warn_return_any = true
-warn_unused_configs = true
-ignore_missing_imports = true
