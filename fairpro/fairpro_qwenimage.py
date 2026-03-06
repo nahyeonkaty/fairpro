@@ -104,6 +104,7 @@ class FairProQwenImagePipeline(FairProMixin, QwenImagePipeline):
         device: str | None = None,
         model: Any | None = None,
         tokenizer: Any | None = None,
+        quantization: str | None = None,
     ) -> None:
         """Enable FairPro system prompt generation.
 
@@ -119,7 +120,11 @@ class FairProQwenImagePipeline(FairProMixin, QwenImagePipeline):
             device: Device to load the model on (only used when loading separate model).
             model: Pre-loaded model instance. If provided, uses this instead.
             tokenizer: Pre-loaded tokenizer instance. Required if model is provided.
+            quantization: Optional quantization mode for separately-loaded LLM
+                ("4bit", "8bit", or None). Ignored for built-in encoder.
         """
+        self.clear_fairpro_cache()
+
         # Use default model name if not specified
         effective_model_name = model_name or self.DEFAULT_FAIRPRO_MODEL
 
@@ -140,6 +145,11 @@ class FairProQwenImagePipeline(FairProMixin, QwenImagePipeline):
 
             logger.info("FairPro enabled using user-provided model")
             logger.info(f"  Device: {self._fairpro_device}")
+            if quantization is not None:
+                logger.warning(
+                    "quantization=%s ignored because a user-provided model was supplied.",
+                    quantization,
+                )
             return
 
         # Check if using the default model (built-in text encoder)
@@ -157,6 +167,11 @@ class FairProQwenImagePipeline(FairProMixin, QwenImagePipeline):
 
             logger.info("FairPro enabled using QwenImage's built-in text encoder")
             logger.info(f"  Device: {self._fairpro_device}")
+            if quantization is not None:
+                logger.warning(
+                    "quantization=%s ignored because built-in text encoder is used.",
+                    quantization,
+                )
         else:
             # Load a separate model
             from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -178,13 +193,21 @@ class FairProQwenImagePipeline(FairProMixin, QwenImagePipeline):
             self._fairpro_tokenizer = AutoTokenizer.from_pretrained(
                 effective_model_name
             )
+            model_kwargs: dict[str, Any] = {
+                "device_map": {"": self._fairpro_device},
+            }
+            if quantization is None:
+                model_kwargs["torch_dtype"] = torch.bfloat16
+            else:
+                model_kwargs.update(self._get_quantization_config(quantization))
             self._fairpro_model = AutoModelForCausalLM.from_pretrained(
                 effective_model_name,
-                torch_dtype=torch.bfloat16,
-                device_map={"": self._fairpro_device},
+                **model_kwargs,
             )
             self._fairpro_enabled = True
             logger.info(f"FairPro LLM loaded successfully on {self._fairpro_device}!")
+            if quantization is not None:
+                logger.info("  Quantization: %s", quantization)
 
     def get_default_system_prompt(self) -> str:
         """Get the default system prompt for QwenImage."""
@@ -271,6 +294,7 @@ class FairProQwenImagePipeline(FairProMixin, QwenImagePipeline):
 
         self._fairpro_model = None
         self._fairpro_tokenizer = None
+        self.clear_fairpro_cache()
         logger.info("FairPro disabled")
 
     def _get_prompt_template_for_system_prompt(
@@ -394,6 +418,12 @@ class FairProQwenImagePipeline(FairProMixin, QwenImagePipeline):
         # FairPro-specific arguments
         use_fairpro: bool = True,
         fairpro_system_prompts: str | list[str] | None = None,
+        fairpro_batch_size: int = 8,
+        fairpro_use_cache: bool = True,
+        fairpro_num_candidates: int = 1,
+        fairpro_select_best: bool = False,
+        fairpro_fairness_weight: float = 0.6,
+        fairpro_faithfulness_weight: float = 0.4,
     ) -> QwenImagePipelineOutput | tuple:
         """Generate images with optional FairPro fairness-aware system prompts.
 
@@ -426,6 +456,12 @@ class FairProQwenImagePipeline(FairProMixin, QwenImagePipeline):
             fairpro_system_prompts: Pre-generated FairPro system prompt(s).
                 Can be a single string (applied to all prompts) or a list
                 (one per prompt).
+            fairpro_batch_size: Batch size for FairPro prompt generation.
+            fairpro_use_cache: Whether to reuse in-memory FairPro cache.
+            fairpro_num_candidates: Number of sampled candidates per prompt.
+            fairpro_select_best: Whether to score and select best candidate.
+            fairpro_fairness_weight: Fairness weight for candidate selection.
+            fairpro_faithfulness_weight: Faithfulness weight for candidate selection.
 
         Returns:
             QwenImagePipelineOutput containing the generated images.
@@ -447,7 +483,15 @@ class FairProQwenImagePipeline(FairProMixin, QwenImagePipeline):
                 logger.info(
                     f"Generating FairPro system prompts for {len(prompts)} prompt(s)..."
                 )
-                system_prompts = self.generate_fairpro_system_prompts_batch(prompts)
+                system_prompts = self.generate_fairpro_system_prompts_batch(
+                    prompts,
+                    batch_size=fairpro_batch_size,
+                    use_cache=fairpro_use_cache,
+                    num_candidates=fairpro_num_candidates,
+                    select_best=fairpro_select_best,
+                    fairness_weight=fairpro_fairness_weight,
+                    faithfulness_weight=fairpro_faithfulness_weight,
+                )
                 self._log_system_prompt_generation(prompts, system_prompts)
             else:
                 logger.info(

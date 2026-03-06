@@ -12,7 +12,9 @@ args = parser.parse_args()
 
 # Load classnames
 
-OBJECT_NAMES_URL = "https://raw.githubusercontent.com/djghosh13/geneval/main/prompts/object_names.txt"
+OBJECT_NAMES_URL = (
+    "https://raw.githubusercontent.com/djghosh13/geneval/main/prompts/object_names.txt"
+)
 object_names_path = os.path.join(os.path.dirname(__file__), "object_names.txt")
 
 if not os.path.exists(object_names_path):
@@ -21,7 +23,7 @@ if not os.path.exists(object_names_path):
 
 with open(object_names_path) as cls_file:
     classnames = [line.strip() for line in cls_file]
-    cls_to_idx = {"_".join(cls.split()):idx for idx, cls in enumerate(classnames)}
+    cls_to_idx = {"_".join(cls.split()): idx for idx, cls in enumerate(classnames)}
 
 # Load results
 
@@ -43,9 +45,11 @@ task_scores = []
 
 print("Task breakdown")
 print("==============")
-for tag, task_df in df.groupby('tag', sort=False):
-    task_scores.append(task_df['correct'].mean())
-    print(f"{tag:<16} = {task_df['correct'].mean():.2%} ({task_df['correct'].sum()} / {len(task_df)})")
+for tag, task_df in df.groupby("tag", sort=False):
+    task_scores.append(task_df["correct"].mean())
+    print(
+        f"{tag:<16} = {task_df['correct'].mean():.2%} ({task_df['correct'].sum()} / {len(task_df)})"
+    )
 print()
 
 print(f"Overall score (avg. over tasks): {np.mean(task_scores):.5f}")

@@ -23,6 +23,14 @@ HEIGHT=1024
 WIDTH=1024
 STEPS=20
 GUIDANCE_SCALE=5.0
+FAIRPRO_MODEL=""
+FAIRPRO_QUANTIZATION=""
+FAIRPRO_BATCH_SIZE=8
+FAIRPRO_NO_CACHE=false
+FAIRPRO_NUM_CANDIDATES=1
+FAIRPRO_SELECT_BEST=false
+FAIRPRO_FAIRNESS_WEIGHT=0.6
+FAIRPRO_FAITHFULNESS_WEIGHT=0.4
 GENERATE_ONLY=false
 EVAL_ONLY=false
 START_IDX=""
@@ -67,6 +75,38 @@ while [[ $# -gt 0 ]]; do
       GUIDANCE_SCALE="$2"
       shift 2
       ;;
+    --fairpro-model)
+      FAIRPRO_MODEL="$2"
+      shift 2
+      ;;
+    --fairpro-quantization)
+      FAIRPRO_QUANTIZATION="$2"
+      shift 2
+      ;;
+    --fairpro-batch-size)
+      FAIRPRO_BATCH_SIZE="$2"
+      shift 2
+      ;;
+    --fairpro-no-cache)
+      FAIRPRO_NO_CACHE=true
+      shift
+      ;;
+    --fairpro-num-candidates)
+      FAIRPRO_NUM_CANDIDATES="$2"
+      shift 2
+      ;;
+    --fairpro-select-best)
+      FAIRPRO_SELECT_BEST=true
+      shift
+      ;;
+    --fairpro-fairness-weight)
+      FAIRPRO_FAIRNESS_WEIGHT="$2"
+      shift 2
+      ;;
+    --fairpro-faithfulness-weight)
+      FAIRPRO_FAITHFULNESS_WEIGHT="$2"
+      shift 2
+      ;;
     --generate-only)
       GENERATE_ONLY=true
       shift
@@ -100,6 +140,14 @@ while [[ $# -gt 0 ]]; do
       echo "  --width WIDTH        Image width (default: 1024)"
       echo "  --steps STEPS        Inference steps (default: 20)"
       echo "  --guidance-scale S   Guidance scale (default: 5.0)"
+      echo "  --fairpro-model M    Optional separate FairPro LLM model name"
+      echo "  --fairpro-quantization Q  FairPro quantization: 4bit or 8bit"
+      echo "  --fairpro-batch-size N    FairPro prompt generation batch size (default: 8)"
+      echo "  --fairpro-no-cache        Disable FairPro in-memory cache"
+      echo "  --fairpro-num-candidates N  Number of sampled FairPro candidates (default: 1)"
+      echo "  --fairpro-select-best     Enable fairness/faithfulness candidate selector"
+      echo "  --fairpro-fairness-weight W      Fairness weight (default: 0.6)"
+      echo "  --fairpro-faithfulness-weight W  Faithfulness weight (default: 0.4)"
       echo "  --generate-only      Only generate images, skip evaluation"
       echo "  --eval-only          Only evaluate existing images, skip generation"
       echo "  --start-idx IDX      Start index for prompts"
@@ -149,6 +197,14 @@ echo "Model:        $MODEL"
 echo "FairPro:      ${FAIRPRO:-disabled}"
 echo "Output Dir:   $IMAGE_DIR"
 echo "GPU(s):       $GPU_IDS"
+if [[ -n "$FAIRPRO" ]]; then
+  echo "FairPro Model: ${FAIRPRO_MODEL:-default}"
+  echo "FairPro Quant: ${FAIRPRO_QUANTIZATION:-none}"
+  echo "FairPro Batch: $FAIRPRO_BATCH_SIZE"
+  echo "FairPro Cache: $([[ "$FAIRPRO_NO_CACHE" == true ]] && echo "disabled" || echo "enabled")"
+  echo "FairPro Cand.: $FAIRPRO_NUM_CANDIDATES"
+  echo "FairPro Select: $FAIRPRO_SELECT_BEST"
+fi
 echo "============================================"
 
 # =============================================
@@ -165,6 +221,23 @@ if [[ "$EVAL_ONLY" == false ]]; then
     echo "Using GPU(s): $GPU_IDS"
   fi
 
+  FAIRPRO_MODEL_ARG=""
+  FAIRPRO_QUANTIZATION_ARG=""
+  FAIRPRO_NO_CACHE_ARG=""
+  FAIRPRO_SELECT_BEST_ARG=""
+  if [[ -n "$FAIRPRO_MODEL" ]]; then
+    FAIRPRO_MODEL_ARG="--fairpro-model $FAIRPRO_MODEL"
+  fi
+  if [[ -n "$FAIRPRO_QUANTIZATION" ]]; then
+    FAIRPRO_QUANTIZATION_ARG="--fairpro-quantization $FAIRPRO_QUANTIZATION"
+  fi
+  if [[ "$FAIRPRO_NO_CACHE" == true ]]; then
+    FAIRPRO_NO_CACHE_ARG="--fairpro-no-cache"
+  fi
+  if [[ "$FAIRPRO_SELECT_BEST" == true ]]; then
+    FAIRPRO_SELECT_BEST_ARG="--fairpro-select-best"
+  fi
+
   python geneval/generate_geneval.py \
     --model "$MODEL" \
     $FAIRPRO \
@@ -174,6 +247,14 @@ if [[ "$EVAL_ONLY" == false ]]; then
     --width "$WIDTH" \
     --steps "$STEPS" \
     --guidance-scale "$GUIDANCE_SCALE" \
+    --fairpro-batch-size "$FAIRPRO_BATCH_SIZE" \
+    --fairpro-num-candidates "$FAIRPRO_NUM_CANDIDATES" \
+    --fairpro-fairness-weight "$FAIRPRO_FAIRNESS_WEIGHT" \
+    --fairpro-faithfulness-weight "$FAIRPRO_FAITHFULNESS_WEIGHT" \
+    $FAIRPRO_MODEL_ARG \
+    $FAIRPRO_QUANTIZATION_ARG \
+    $FAIRPRO_NO_CACHE_ARG \
+    $FAIRPRO_SELECT_BEST_ARG \
     $START_IDX \
     $END_IDX
 

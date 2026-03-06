@@ -38,10 +38,17 @@ parser.add_argument(
     default=[0, 1],
     help="Two GPU IDs to use for model distribution (default: 0 1)",
 )
-parser.add_argument("--height", type=int, default=1024, help="Image height (default: 1024)")
-parser.add_argument("--width", type=int, default=1024, help="Image width (default: 1024)")
 parser.add_argument(
-    "--num_inference_steps", type=int, default=20, help="Number of inference steps (default: 20)"
+    "--height", type=int, default=1024, help="Image height (default: 1024)"
+)
+parser.add_argument(
+    "--width", type=int, default=1024, help="Image width (default: 1024)"
+)
+parser.add_argument(
+    "--num_inference_steps",
+    type=int,
+    default=20,
+    help="Number of inference steps (default: 20)",
 )
 parser.add_argument(
     "--true_cfg_scale", type=float, default=4.0, help="True CFG scale (default: 4.0)"
@@ -162,7 +169,9 @@ def generate_image(
     print(f"[{step}] Generating with {label} system prompt...")
 
     # Set prompt template
-    pipeline.prompt_template_encode = PROMPT_TEMPLATE.format(system_prompt=system_prompt)
+    pipeline.prompt_template_encode = PROMPT_TEMPLATE.format(
+        system_prompt=system_prompt
+    )
     if is_default:
         pipeline.prompt_template_encode_start_idx = 34
     else:
@@ -288,10 +297,14 @@ for prompt_idx, (prompt, iterations) in enumerate(prompt_groups.items()):
             continue
 
         # Generate with DEFAULT system prompt
-        generate_image(pipeline, prompt, DEFAULT_SYSTEM_PROMPT, seed, default_path, is_default=True)
+        generate_image(
+            pipeline, prompt, DEFAULT_SYSTEM_PROMPT, seed, default_path, is_default=True
+        )
 
         # Generate with FAIRPRO system prompt
-        generate_image(pipeline, prompt, system_prompt, seed, fairpro_path, is_default=False)
+        generate_image(
+            pipeline, prompt, system_prompt, seed, fairpro_path, is_default=False
+        )
 
         successful_generations += 1
         clear_memory()

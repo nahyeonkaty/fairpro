@@ -10,7 +10,23 @@ from pathlib import Path
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from fairpro.fairpro_mixin import META_PROMPT
+META_PROMPT = """You are an intelligent, unbiased assistant.
+Your goal is to design a fair instruction that guides detailed, accurate, and globally inclusive image descriptions.
+
+Consider the following user prompt:
+"{user_prompt}"
+
+Identify potential social stereotypes or demographic assumptions that could arise from a default image-description system prompt.
+Then produce a revised system prompt that preserves fidelity to the user intent while encouraging fair and inclusive descriptions.
+
+CAUTION: If the user prompt does not involve humans (e.g., inanimate objects, landscapes, animals), output this exact default system prompt:
+"Describe the image by detailing the color, shape, size, texture, quantity, text, spatial relationships of the objects and background:"
+
+Output requirements:
+- Output only one final system prompt.
+- Wrap it exactly in tags:
+<system_prompt>YOUR_PROMPT_HERE</system_prompt>
+"""
 
 
 # ============================================================================
@@ -86,6 +102,7 @@ def generate_system_prompt(
     model: AutoModelForCausalLM,
     tokenizer: AutoTokenizer,
     user_prompt: str,
+    seed: int | None = None,
 ) -> str:
     """Generate a fairness-aware system prompt for a given user prompt.
 
@@ -97,8 +114,21 @@ def generate_system_prompt(
     Returns:
         The generated fairness-aware system prompt.
     """
+    if seed is not None:
+        # Ensure per-seed reproducibility for sampling-based generation.
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+
     formatted_prompt = META_PROMPT.format(user_prompt=user_prompt)
     inputs = tokenizer(formatted_prompt, return_tensors="pt").to(model.device)
+
+    generation_device = (
+        model.device if hasattr(model, "device") else inputs["input_ids"].device
+    )
+    generator = None
+    if seed is not None:
+        generator = torch.Generator(device=generation_device).manual_seed(seed)
 
     with torch.inference_mode():
         outputs = model.generate(
@@ -107,6 +137,7 @@ def generate_system_prompt(
             temperature=0.7,
             do_sample=True,
             pad_token_id=tokenizer.eos_token_id,
+            generator=generator,
         )
 
     response = tokenizer.decode(
@@ -136,7 +167,9 @@ parser.add_argument(
     default="fairpro_sp.json",
     help="Path to save the output JSON file (default: fairpro_sp.json)",
 )
-parser.add_argument("--gpu_id", type=int, default=0, help="GPU device ID to use (default: 0)")
+parser.add_argument(
+    "--gpu_id", type=int, default=0, help="GPU device ID to use (default: 0)"
+)
 parser.add_argument(
     "--model_name",
     type=str,
@@ -184,30 +217,44 @@ output_path.parent.mkdir(parents=True, exist_ok=True)
 
 # Load existing prompts if file exists (for resuming)
 all_fairpro_prompts = load_existing_results(output_path)
-processed_prompts = {item["prompt"] for item in all_fairpro_prompts}
+processed_prompt_seeds: set[tuple[str, int]] = set()
+for item in all_fairpro_prompts:
+    prompt = item.get("prompt")
+    seed = item.get("parameters", {}).get("seed")
+    if prompt is None or seed is None:
+        continue
+    try:
+        processed_prompt_seeds.add((prompt, int(seed)))
+    except (TypeError, ValueError):
+        continue
 
 print(f"Generating FairPro system prompts for {len(all_prompts)} prompts...")
-print(f"Already completed: {len(all_fairpro_prompts)} prompts")
+print(f"Already completed entries: {len(all_fairpro_prompts)}")
 print("=" * 80 + "\n")
 
 # Generate system prompts for each user prompt
 for i, user_prompt in enumerate(all_prompts):
-    # Skip if already generated
-    if user_prompt in processed_prompts:
-        continue
-
     print(f"[{i + 1}/{len(all_prompts)}] Generating for: {user_prompt}")
 
     # Generate multiple seeds for each prompt
     for seed in range(args.seeds):
+        if (user_prompt, seed) in processed_prompt_seeds:
+            continue
+
         print(f"Seed {seed + 1}/{args.seeds}")
         try:
-            parsed_sys = generate_system_prompt(model, tokenizer, user_prompt)
+            parsed_sys = generate_system_prompt(
+                model, tokenizer, user_prompt, seed=seed
+            )
 
             # Store the result
             all_fairpro_prompts.append(
-                {"prompt": user_prompt, "parameters": {"system_prompt": parsed_sys, "seed": seed}}
+                {
+                    "prompt": user_prompt,
+                    "parameters": {"system_prompt": parsed_sys, "seed": seed},
+                }
             )
+            processed_prompt_seeds.add((user_prompt, seed))
 
             # Print sample for first seed of first few prompts
             if i < 3 and seed == 0:
@@ -236,4 +283,4 @@ save_results(output_path, all_fairpro_prompts)
 
 print(f"\nSaved FairPro system prompts to: {output_path}")
 print(f"File size: {output_path.stat().st_size / 1024:.2f} KB")
-print(f"Total occupations: {len(all_fairpro_prompts)}")
+print(f"Total generated entries: {len(all_fairpro_prompts)}")

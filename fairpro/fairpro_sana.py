@@ -91,12 +91,94 @@ class FairProSanaPipeline(FairProMixin, SanaPipeline):
     # Default FairPro model - Gemma 2 2B Instruct (same architecture as Sana's text encoder)
     DEFAULT_FAIRPRO_MODEL = "google/gemma-2-2b-it"
 
+    def enable_fairpro_shared(
+        self,
+        model_name: str | None = None,
+        device: str | None = None,
+        quantization: str | None = None,
+    ) -> None:
+        """Enable FairPro with a single shared Gemma model for both encoding and generation.
+
+        This method loads a Gemma2ForCausalLM model and uses it for both:
+        1. Text encoding (replaces Sana's built-in text encoder)
+        2. FairPro system prompt generation
+
+        This saves GPU memory by loading only one model instead of two.
+
+        Args:
+            model_name: HuggingFace model name for the LLM. Defaults to
+                "google/gemma-2-2b-it".
+            device: Device to load the model on. If None, uses the pipeline's device.
+            quantization: Optional quantization mode for shared LLM
+                ("4bit", "8bit", or None).
+
+        Example:
+            ```python
+            pipe = FairProSanaPipeline.from_pretrained(...)
+            pipe.enable_fairpro_shared(model_name="google/gemma-2-2b-it")
+            # Now both text encoding and FairPro use the same model
+            ```
+        """
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        self.clear_fairpro_cache()
+        effective_model_name = model_name or self.DEFAULT_FAIRPRO_MODEL
+
+        # Determine device
+        if device is not None:
+            target_device = device
+        elif hasattr(self, "device"):
+            target_device = str(self.device)
+        else:
+            target_device = "cuda:0" if torch.cuda.is_available() else "cpu"
+
+        logger.info(
+            f"Loading shared Gemma model: {effective_model_name} on {target_device}..."
+        )
+
+        # Load the CausalLM model (with LM head)
+        tokenizer = AutoTokenizer.from_pretrained(effective_model_name)
+        model_kwargs: dict[str, Any] = {"device_map": {"": target_device}}
+        if quantization is None:
+            model_kwargs["torch_dtype"] = torch.bfloat16
+        else:
+            model_kwargs.update(self._get_quantization_config(quantization))
+        model = AutoModelForCausalLM.from_pretrained(
+            effective_model_name,
+            **model_kwargs,
+        )
+
+        # Replace Sana's text encoder with the base model (without LM head)
+        # The base model is accessed via .model attribute in CausalLM
+        old_text_encoder = self.text_encoder
+        self.text_encoder = model.model  # Gemma2Model (base, no LM head)
+        self.tokenizer = tokenizer
+
+        # Free the old text encoder
+        del old_text_encoder
+        torch.cuda.empty_cache()
+
+        # Set up FairPro to use the full CausalLM model (with LM head)
+        self._fairpro_model = model
+        self._fairpro_tokenizer = tokenizer
+        self._fairpro_enabled = True
+        self._fairpro_model_name = f"{effective_model_name} (shared)"
+        self._fairpro_device = target_device
+        self._use_builtin_encoder = True  # Mark as using shared/builtin
+
+        logger.info(f"Shared Gemma model loaded successfully on {target_device}!")
+        logger.info("  - text_encoder: using model.model (base, no LM head)")
+        logger.info("  - FairPro: using full model (with LM head)")
+        if quantization is not None:
+            logger.info("  - Quantization: %s", quantization)
+
     def enable_fairpro(
         self,
         model_name: str | None = None,
         device: str | None = None,
         model: Any | None = None,
         tokenizer: Any | None = None,
+        quantization: str | None = None,
     ) -> None:
         """Enable FairPro system prompt generation.
 
@@ -114,8 +196,12 @@ class FairProSanaPipeline(FairProMixin, SanaPipeline):
                 or same device as pipeline.
             model: Pre-loaded model instance. If provided, model_name is ignored.
             tokenizer: Pre-loaded tokenizer instance. Required if model is provided.
+            quantization: Optional quantization mode for FairPro LLM
+                ("4bit", "8bit", or None).
         """
         from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        self.clear_fairpro_cache()
 
         # Use default model name if not specified
         effective_model_name = model_name or self.DEFAULT_FAIRPRO_MODEL
@@ -138,6 +224,11 @@ class FairProSanaPipeline(FairProMixin, SanaPipeline):
 
             logger.info("FairPro enabled using user-provided model")
             logger.info(f"  Device: {self._fairpro_device}")
+            if quantization is not None:
+                logger.warning(
+                    "quantization=%s ignored because a user-provided model was supplied.",
+                    quantization,
+                )
             return
 
         # Determine device
@@ -165,13 +256,19 @@ class FairProSanaPipeline(FairProMixin, SanaPipeline):
             f"Loading FairPro LLM: {effective_model_name} on {self._fairpro_device}..."
         )
         self._fairpro_tokenizer = AutoTokenizer.from_pretrained(effective_model_name)
+        model_kwargs: dict[str, Any] = {"device_map": {"": self._fairpro_device}}
+        if quantization is None:
+            model_kwargs["torch_dtype"] = torch.bfloat16
+        else:
+            model_kwargs.update(self._get_quantization_config(quantization))
         self._fairpro_model = AutoModelForCausalLM.from_pretrained(
             effective_model_name,
-            torch_dtype=torch.bfloat16,
-            device_map={"": self._fairpro_device},
+            **model_kwargs,
         )
         self._fairpro_enabled = True
         logger.info(f"FairPro LLM loaded successfully on {self._fairpro_device}!")
+        if quantization is not None:
+            logger.info("  Quantization: %s", quantization)
 
     def disable_fairpro(self) -> None:
         """Disable FairPro and free the LLM memory."""
@@ -185,6 +282,7 @@ class FairProSanaPipeline(FairProMixin, SanaPipeline):
             self._fairpro_tokenizer = None
 
         torch.cuda.empty_cache()  # noqa: F821
+        self.clear_fairpro_cache()
         logger.info("FairPro disabled")
 
     def get_meta_prompt(self) -> str:
@@ -232,6 +330,12 @@ class FairProSanaPipeline(FairProMixin, SanaPipeline):
         # FairPro-specific arguments
         use_fairpro: bool = True,
         fairpro_system_prompts: str | list[str] | None = None,
+        fairpro_batch_size: int = 8,
+        fairpro_use_cache: bool = True,
+        fairpro_num_candidates: int = 1,
+        fairpro_select_best: bool = False,
+        fairpro_fairness_weight: float = 0.6,
+        fairpro_faithfulness_weight: float = 0.4,
     ) -> SanaPipelineOutput | tuple:
         """Generate images with optional FairPro fairness-aware system prompts.
 
@@ -268,6 +372,12 @@ class FairProSanaPipeline(FairProMixin, SanaPipeline):
             fairpro_system_prompts: Pre-generated FairPro system prompt(s).
                 Can be a single string (applied to all prompts) or a list
                 (one per prompt).
+            fairpro_batch_size: Batch size for FairPro prompt generation.
+            fairpro_use_cache: Whether to reuse in-memory FairPro cache.
+            fairpro_num_candidates: Number of sampled candidates per prompt.
+            fairpro_select_best: Whether to score and select best candidate.
+            fairpro_fairness_weight: Fairness weight for candidate selection.
+            fairpro_faithfulness_weight: Faithfulness weight for candidate selection.
 
         Returns:
             SanaPipelineOutput containing the generated images.
@@ -291,7 +401,15 @@ class FairProSanaPipeline(FairProMixin, SanaPipeline):
                 logger.info(
                     f"Generating FairPro system prompts for {len(prompts)} prompt(s)..."
                 )
-                system_prompts = self.generate_fairpro_system_prompts_batch(prompts)
+                system_prompts = self.generate_fairpro_system_prompts_batch(
+                    prompts,
+                    batch_size=fairpro_batch_size,
+                    use_cache=fairpro_use_cache,
+                    num_candidates=fairpro_num_candidates,
+                    select_best=fairpro_select_best,
+                    fairness_weight=fairpro_fairness_weight,
+                    faithfulness_weight=fairpro_faithfulness_weight,
+                )
                 self._log_system_prompt_generation(prompts, system_prompts)
             else:
                 logger.info(

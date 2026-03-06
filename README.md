@@ -134,6 +134,136 @@ python generate.py
 
 > **Note:** For Qwen-Image with GPU VRAM > 48GB, you may disable DF11 for improved performance.
 
+### Step 3: Prepare GenEval Evaluation (Optional but Recommended)
+
+Build the GenEval Docker evaluator once:
+
+```bash
+docker build -t geneval:latest geneval/
+```
+
+Run generation + evaluation:
+
+```bash
+./run_geneval.sh --model qwenimage --fairpro
+```
+
+### Experiment Guide (Requested 1,2,4,5)
+
+This section documents how to run controlled experiments for:
+- **(1)** true batched FairPro prompt generation
+- **(2)** in-memory prompt/bias caching
+- **(4)** quantized FairPro LLM loading
+- **(5)** candidate selector (fairness + faithfulness)
+
+#### Key FairPro Flags
+
+| Flag | Description |
+|------|-------------|
+| `--fairpro-batch-size N` | Batch size for FairPro system prompt generation |
+| `--fairpro-no-cache` | Disable in-memory cache (cache is enabled by default) |
+| `--fairpro-model MODEL` | Use an external FairPro LLM instead of built-in encoder |
+| `--fairpro-quantization {4bit,8bit}` | Quantize external FairPro LLM (requires bitsandbytes) |
+| `--fairpro-num-candidates K` | Number of sampled prompt candidates per user prompt |
+| `--fairpro-select-best` | Enable fairness/faithfulness candidate scoring and selection |
+| `--fairpro-fairness-weight W` | Fairness weight in selector |
+| `--fairpro-faithfulness-weight W` | Faithfulness weight in selector |
+
+#### Experiment 1: Batched Prompt Generation
+
+```bash
+./run_geneval.sh \
+  --model qwenimage \
+  --fairpro \
+  --fairpro-batch-size 32 \
+  --generate-only
+```
+
+#### Experiment 2: Cache Ablation (On vs Off)
+
+Cache ON (default):
+
+```bash
+./run_geneval.sh \
+  --model qwenimage \
+  --fairpro \
+  --fairpro-batch-size 32 \
+  --generate-only
+```
+
+Cache OFF:
+
+```bash
+./run_geneval.sh \
+  --model qwenimage \
+  --fairpro \
+  --fairpro-batch-size 32 \
+  --fairpro-no-cache \
+  --generate-only
+```
+
+#### Experiment 4: Quantized External FairPro LLM
+
+Install quantization dependency first:
+
+```bash
+uv pip install bitsandbytes
+```
+
+Then run (example with 4-bit Gemma on SANA):
+
+```bash
+./run_geneval.sh \
+  --model sana \
+  --fairpro \
+  --fairpro-model google/gemma-2-2b-it \
+  --fairpro-quantization 4bit \
+  --generate-only
+```
+
+#### Experiment 5: Candidate Selector (Fairness + Faithfulness)
+
+```bash
+./run_geneval.sh \
+  --model qwenimage \
+  --fairpro \
+  --fairpro-num-candidates 4 \
+  --fairpro-select-best \
+  --fairpro-fairness-weight 0.7 \
+  --fairpro-faithfulness-weight 0.3 \
+  --generate-only
+```
+
+#### Combined Run (1+2+4+5 together)
+
+```bash
+./run_geneval.sh \
+  --model sana \
+  --fairpro \
+  --fairpro-model google/gemma-2-2b-it \
+  --fairpro-quantization 4bit \
+  --fairpro-batch-size 32 \
+  --fairpro-num-candidates 4 \
+  --fairpro-select-best \
+  --fairpro-fairness-weight 0.7 \
+  --fairpro-faithfulness-weight 0.3 \
+  --generate-only
+```
+
+### Quick Single-Prompt Smoke Test
+
+Use `generate_fairpro.py` for fast qualitative checks:
+
+```bash
+python generate_fairpro.py \
+  --prompt "A doctor examining a patient" \
+  --compare \
+  --fairpro-batch-size 8 \
+  --fairpro-num-candidates 4 \
+  --fairpro-select-best \
+  --output-dir outputs/smoke
+```
+
 ## Citation
 
 If you find this work useful, please cite our paper:

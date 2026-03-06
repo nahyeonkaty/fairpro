@@ -34,9 +34,7 @@ from PIL import Image
 from torchvision.transforms import ToTensor
 from torchvision.utils import make_grid
 
-GENEVAL_METADATA_URL = (
-    "https://raw.githubusercontent.com/djghosh13/geneval/main/prompts/evaluation_metadata.jsonl"
-)
+GENEVAL_METADATA_URL = "https://raw.githubusercontent.com/djghosh13/geneval/main/prompts/evaluation_metadata.jsonl"
 
 
 def parse_args() -> argparse.Namespace:
@@ -62,6 +60,53 @@ def parse_args() -> argparse.Namespace:
         "--fairpro",
         action="store_true",
         help="Enable FairPro for fairness-aware generation",
+    )
+    parser.add_argument(
+        "--fairpro-model",
+        type=str,
+        default=None,
+        help="Optional separate LLM for FairPro prompt generation",
+    )
+    parser.add_argument(
+        "--fairpro-quantization",
+        type=str,
+        choices=["4bit", "8bit"],
+        default=None,
+        help="Optional quantization mode for FairPro LLM",
+    )
+    parser.add_argument(
+        "--fairpro-batch-size",
+        type=int,
+        default=8,
+        help="Batch size for FairPro system prompt generation (default: 8)",
+    )
+    parser.add_argument(
+        "--fairpro-no-cache",
+        action="store_true",
+        help="Disable in-memory FairPro cache",
+    )
+    parser.add_argument(
+        "--fairpro-num-candidates",
+        type=int,
+        default=1,
+        help="Number of sampled FairPro candidates per prompt (default: 1)",
+    )
+    parser.add_argument(
+        "--fairpro-select-best",
+        action="store_true",
+        help="Score and select best FairPro candidate prompt",
+    )
+    parser.add_argument(
+        "--fairpro-fairness-weight",
+        type=float,
+        default=0.6,
+        help="Fairness weight for candidate selector (default: 0.6)",
+    )
+    parser.add_argument(
+        "--fairpro-faithfulness-weight",
+        type=float,
+        default=0.4,
+        help="Faithfulness weight for candidate selector (default: 0.4)",
     )
     parser.add_argument(
         "--all",
@@ -230,7 +275,10 @@ def generate_with_qwenimage(
 
     if use_fairpro:
         print("Enabling FairPro...")
-        pipe.enable_fairpro()
+        pipe.enable_fairpro(
+            model_name=args.fairpro_model,
+            quantization=args.fairpro_quantization,
+        )
 
     gen_kwargs = {
         "height": args.height,
@@ -240,8 +288,32 @@ def generate_with_qwenimage(
         "true_cfg_scale": args.true_cfg_scale,
         "negative_prompt": args.negative_prompt,
     }
+    fairpro_kwargs = {
+        "fairpro_batch_size": args.fairpro_batch_size,
+        "fairpro_use_cache": not args.fairpro_no_cache,
+        "fairpro_num_candidates": args.fairpro_num_candidates,
+        "fairpro_select_best": args.fairpro_select_best,
+        "fairpro_fairness_weight": args.fairpro_fairness_weight,
+        "fairpro_faithfulness_weight": args.fairpro_faithfulness_weight,
+    }
 
     total = len(prompts)
+    fairpro_system_prompt_map: dict[str, str] = {}
+
+    if use_fairpro:
+        print("\nPre-generating FairPro system prompts in batches...")
+        for start in range(0, total, max(1, args.fairpro_batch_size)):
+            prompt_chunk = prompts[start : start + max(1, args.fairpro_batch_size)]
+            generated_chunk = pipe.generate_fairpro_system_prompts_batch(
+                prompt_chunk,
+                batch_size=args.fairpro_batch_size,
+                use_cache=not args.fairpro_no_cache,
+                num_candidates=args.fairpro_num_candidates,
+                select_best=args.fairpro_select_best,
+                fairness_weight=args.fairpro_fairness_weight,
+                faithfulness_weight=args.fairpro_faithfulness_weight,
+            )
+            fairpro_system_prompt_map.update(dict(zip(prompt_chunk, generated_chunk)))
 
     for i, prompt in enumerate(prompts):
         # Use global index (start_idx + i) for folder naming to match original format
@@ -263,15 +335,14 @@ def generate_with_qwenimage(
 
         print(f"\nPrompt ({i + 1:>3}/{total}): '{prompt}'")
 
+        if use_fairpro:
+            system_prompt = fairpro_system_prompt_map[prompt]
+        else:
+            system_prompt = pipe.get_default_system_prompt()
+
         all_images = []
         for seed_idx, seed in enumerate(seeds):
             print(f"  Generating seed {seed}...")
-
-            # Determine system prompt for this prompt+seed (save in single log file)
-            if use_fairpro:
-                system_prompt = pipe.generate_fairpro_system_prompt(prompt)
-            else:
-                system_prompt = pipe.get_default_system_prompt()
 
             with open(system_prompt_log_path, "a") as f:
                 json.dump(
@@ -293,6 +364,7 @@ def generate_with_qwenimage(
                 generator=generator,
                 use_fairpro=use_fairpro,
                 fairpro_system_prompts=system_prompt if use_fairpro else None,
+                **fairpro_kwargs,
                 **gen_kwargs,
             )
 
@@ -344,7 +416,6 @@ def generate_with_sana(
     config_dir = output_dir / config_name
     config_dir.mkdir(parents=True, exist_ok=True)
 
-
     print("=" * 80)
     print(f"Configuration: {config_name.upper()}")
     print(f"Output Directory: {config_dir}")
@@ -359,7 +430,10 @@ def generate_with_sana(
 
     if use_fairpro:
         print("Enabling FairPro...")
-        pipe.enable_fairpro()
+        pipe.enable_fairpro(
+            model_name=args.fairpro_model,
+            quantization=args.fairpro_quantization,
+        )
 
     gen_kwargs = {
         "height": args.height,
@@ -368,8 +442,32 @@ def generate_with_sana(
         "guidance_scale": args.guidance_scale,
         "negative_prompt": args.negative_prompt,
     }
+    fairpro_kwargs = {
+        "fairpro_batch_size": args.fairpro_batch_size,
+        "fairpro_use_cache": not args.fairpro_no_cache,
+        "fairpro_num_candidates": args.fairpro_num_candidates,
+        "fairpro_select_best": args.fairpro_select_best,
+        "fairpro_fairness_weight": args.fairpro_fairness_weight,
+        "fairpro_faithfulness_weight": args.fairpro_faithfulness_weight,
+    }
 
     total = len(prompts)
+    fairpro_system_prompt_map: dict[str, str] = {}
+
+    if use_fairpro:
+        print("\nPre-generating FairPro system prompts in batches...")
+        for start in range(0, total, max(1, args.fairpro_batch_size)):
+            prompt_chunk = prompts[start : start + max(1, args.fairpro_batch_size)]
+            generated_chunk = pipe.generate_fairpro_system_prompts_batch(
+                prompt_chunk,
+                batch_size=args.fairpro_batch_size,
+                use_cache=not args.fairpro_no_cache,
+                num_candidates=args.fairpro_num_candidates,
+                select_best=args.fairpro_select_best,
+                fairness_weight=args.fairpro_fairness_weight,
+                faithfulness_weight=args.fairpro_faithfulness_weight,
+            )
+            fairpro_system_prompt_map.update(dict(zip(prompt_chunk, generated_chunk)))
 
     for i, prompt in enumerate(prompts):
         # Use global index (start_idx + i) for folder naming to match original format
@@ -391,15 +489,14 @@ def generate_with_sana(
 
         print(f"\nPrompt ({i + 1:>3}/{total}): '{prompt}'")
 
+        if use_fairpro:
+            system_prompt = fairpro_system_prompt_map[prompt]
+        else:
+            system_prompt = pipe.get_default_system_prompt()
+
         all_images = []
         for seed_idx, seed in enumerate(seeds):
             print(f"  Generating seed {seed}...")
-
-            # Determine system prompt for this prompt+seed (save in single log file)
-            if use_fairpro:
-                system_prompt = pipe.generate_fairpro_system_prompt(prompt)
-            else:
-                system_prompt = pipe.get_default_system_prompt()
 
             with open(system_prompt_log_path, "a") as f:
                 json.dump(
@@ -421,6 +518,7 @@ def generate_with_sana(
                 generator=generator,
                 use_fairpro=use_fairpro,
                 fairpro_system_prompts=system_prompt if use_fairpro else None,
+                **fairpro_kwargs,
                 **gen_kwargs,
             )
 
@@ -489,17 +587,47 @@ def main():
         for model, use_fairpro in configurations:
             if model == "qwenimage":
                 generate_with_qwenimage(
-                    prompts, args.seeds, output_dir, use_fairpro, args, start_idx, metadata_list
+                    prompts,
+                    args.seeds,
+                    output_dir,
+                    use_fairpro,
+                    args,
+                    start_idx,
+                    metadata_list,
                 )
             else:
-                generate_with_sana(prompts, args.seeds, output_dir, use_fairpro, args, start_idx, metadata_list)
+                generate_with_sana(
+                    prompts,
+                    args.seeds,
+                    output_dir,
+                    use_fairpro,
+                    args,
+                    start_idx,
+                    metadata_list,
+                )
 
     else:
         # Run single configuration
         if args.model == "qwenimage":
-            generate_with_qwenimage(prompts, args.seeds, output_dir, args.fairpro, args, start_idx, metadata_list)
+            generate_with_qwenimage(
+                prompts,
+                args.seeds,
+                output_dir,
+                args.fairpro,
+                args,
+                start_idx,
+                metadata_list,
+            )
         else:
-            generate_with_sana(prompts, args.seeds, output_dir, args.fairpro, args, start_idx, metadata_list)
+            generate_with_sana(
+                prompts,
+                args.seeds,
+                output_dir,
+                args.fairpro,
+                args,
+                start_idx,
+                metadata_list,
+            )
 
     print("\n" + "=" * 80)
     print("All generations complete!")
