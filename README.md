@@ -1,21 +1,22 @@
-# Aligned but Stereotypical? The Hidden Influence of System Prompts on Social Bias in LVLM-Based Text-to-Image Models
+# Aligned but Stereotypical? The Hidden Influence of System Prompts on Social Bias in LLM-based Text-to-Image Models
 
-[NaHyeon Park](https://nahyeonkaty.github.io)<sup>*1</sup>, [Na Min An](https://namin-an.github.io)<sup>*1</sup>, [Kunhee Kim](https://kunheek.github.io)<sup>1</sup>, Soyeon Yoon<sup>1</sup>, [Jiahao Huo](https://z1zs.github.io)<sup>2</sup>, [Hyunjung Shim](https://kaist-cvml.github.io)<sup>1</sup>
+[NaHyeon Park](https://nahyeonkaty.github.io)<sup>*1</sup>, [Na Min An](https://namin-an.github.io)<sup>*1</sup>, [Kunhee Kim](https://kunheek.github.io)<sup>*1</sup>, [Soyeon Yoon](https://scholar.google.com/citations?user=pAg57yIAAAAJ&hl=ko)<sup>1</sup>, [Jiahao Huo](https://z1zs.github.io)<sup>2</sup>, [Hyunjung Shim](https://kaist-cvml.github.io)<sup>1</sup>
 
-<sup>1</sup>KAIST, <sup>2</sup>HKUST
+<sup>1</sup>KAIST, <sup>2</sup>HKUST(GZ)
 
 [![arXiv](https://img.shields.io/badge/arXiv-2512.04981-B31B1B.svg)](https://arxiv.org/abs/2512.04981)
 [![Project page](https://img.shields.io/badge/Project-Page-brightgreen)](https://fairpro-t2i.github.io)
+[![Hugging Face Dataset](https://img.shields.io/badge/Hugging%20Face-Dataset-yellow)](https://huggingface.co/datasets/nahyeonkaty/fairpro)
 
 <div style="text-align: center;">
   <img src="assets/teaser.png" alt="Alt text">
 </div>
 
 ## Summary
-- We find that LVLM-based T2I models produce markedly more socially biased images than non-LVLM-based models.
+- We find that LLM-based T2I models produce markedly more socially biased images than non-LLM-based models.
 - We introduce a 1,024 prompt benchmark spanning four levels of linguistic complexity and evaluate demographic bias across multiple attributes in a systematic manner.
-- Our analysis identifies system prompts, the predefined instructions guiding LVLMs, as a primary driver of biased behavior. 
-- We propose FairPro, a training-free meta-prompting framework that enables LVLMs to self-audit and construct fairness-aware system prompts at test time. 
+- Our analysis identifies system prompts, the predefined instructions guiding LLMs, as a primary driver of biased behavior. 
+- We propose FairPro, a training-free meta-prompting framework that enables LLMs to self-audit and construct fairness-aware system prompts at test time. 
 
 ## Benchmark
 
@@ -109,7 +110,7 @@ python fairpro.py
 | `--model_name` | `Qwen/Qwen2.5-7B-Instruct` | HuggingFace model for prompt generation |
 | `--seeds` | `10` | Number of seeds per prompt |
 
-> **Note:** FairPro uses the same LVLM that is used for the T2I pipeline. Adjust `--model_name` accordingly.
+> **Note:** FairPro uses the same LLM that is used for the T2I pipeline. Adjust `--model_name` accordingly.
 
 ### Step 2: Generate Comparison Images
 
@@ -134,120 +135,14 @@ python generate.py
 
 > **Note:** For Qwen-Image with GPU VRAM > 48GB, you may disable DF11 for improved performance.
 
-### Step 3: Prepare GenEval Evaluation (Optional but Recommended)
+### GenEval Evaluation
 
-Build the GenEval Docker evaluator once:
+To reduce confusion, all GenEval setup and evaluation details are documented separately in [geneval/README.md](geneval/README.md).
 
-```bash
-docker build -t geneval:latest geneval/
-```
-
-Run generation + evaluation:
+Quick entry point:
 
 ```bash
 ./run_geneval.sh --model qwenimage --fairpro
-```
-
-### Experiment Guide (Requested 1,2,4,5)
-
-This section documents how to run controlled experiments for:
-- **(1)** true batched FairPro prompt generation
-- **(2)** in-memory prompt/bias caching
-- **(4)** quantized FairPro LLM loading
-- **(5)** candidate selector (fairness + faithfulness)
-
-#### Key FairPro Flags
-
-| Flag | Description |
-|------|-------------|
-| `--fairpro-batch-size N` | Batch size for FairPro system prompt generation |
-| `--fairpro-no-cache` | Disable in-memory cache (cache is enabled by default) |
-| `--fairpro-model MODEL` | Use an external FairPro LLM instead of built-in encoder |
-| `--fairpro-quantization {4bit,8bit}` | Quantize external FairPro LLM (requires bitsandbytes) |
-| `--fairpro-num-candidates K` | Number of sampled prompt candidates per user prompt |
-| `--fairpro-select-best` | Enable fairness/faithfulness candidate scoring and selection |
-| `--fairpro-fairness-weight W` | Fairness weight in selector |
-| `--fairpro-faithfulness-weight W` | Faithfulness weight in selector |
-
-#### Experiment 1: Batched Prompt Generation
-
-```bash
-./run_geneval.sh \
-  --model qwenimage \
-  --fairpro \
-  --fairpro-batch-size 32 \
-  --generate-only
-```
-
-#### Experiment 2: Cache Ablation (On vs Off)
-
-Cache ON (default):
-
-```bash
-./run_geneval.sh \
-  --model qwenimage \
-  --fairpro \
-  --fairpro-batch-size 32 \
-  --generate-only
-```
-
-Cache OFF:
-
-```bash
-./run_geneval.sh \
-  --model qwenimage \
-  --fairpro \
-  --fairpro-batch-size 32 \
-  --fairpro-no-cache \
-  --generate-only
-```
-
-#### Experiment 4: Quantized External FairPro LLM
-
-Install quantization dependency first:
-
-```bash
-uv pip install bitsandbytes
-```
-
-Then run (example with 4-bit Gemma on SANA):
-
-```bash
-./run_geneval.sh \
-  --model sana \
-  --fairpro \
-  --fairpro-model google/gemma-2-2b-it \
-  --fairpro-quantization 4bit \
-  --generate-only
-```
-
-#### Experiment 5: Candidate Selector (Fairness + Faithfulness)
-
-```bash
-./run_geneval.sh \
-  --model qwenimage \
-  --fairpro \
-  --fairpro-num-candidates 4 \
-  --fairpro-select-best \
-  --fairpro-fairness-weight 0.7 \
-  --fairpro-faithfulness-weight 0.3 \
-  --generate-only
-```
-
-#### Combined Run (1+2+4+5 together)
-
-```bash
-./run_geneval.sh \
-  --model sana \
-  --fairpro \
-  --fairpro-model google/gemma-2-2b-it \
-  --fairpro-quantization 4bit \
-  --fairpro-batch-size 32 \
-  --fairpro-num-candidates 4 \
-  --fairpro-select-best \
-  --fairpro-fairness-weight 0.7 \
-  --fairpro-faithfulness-weight 0.3 \
-  --generate-only
 ```
 
 ### Quick Single-Prompt Smoke Test
@@ -270,7 +165,7 @@ If you find this work useful, please cite our paper:
 
 ```bibtex
 @article{park2025fairpro,
-  title   = {Aligned but Stereotypical? The Hidden Influence of System Prompts on Social Bias in LVLM-Based Text-to-Image Models},
+  title   = {Aligned but Stereotypical? Understanding and Mitigating Social Bias in LLM-Based Text-to-Image Models},
   author  = {Park, NaHyeon and An, Namin and Kim, Kunhee and Yoon, Soyeon and Huo, Jiahao and Shim, Hyunjung},
   journal = {arXiv preprint},
   year    = {2025},
